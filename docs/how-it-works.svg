@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="600" viewBox="0 0 960 600" role="img" aria-labelledby="title desc">
+  <title id="title">How per-country CDN caching works on Vercel</title>
+  <desc id="desc">The proxy gets the visitor's country from Vercel geolocation and sets three request headers: x-country, x-extra-vary and x-extra-response-headers. Vercel's CDN keys its cache on the URL plus the request's x-country header. On a hit it returns the cached copy. On a miss the patched page function runs, sets the x-country response header and adds x-country to Vary, and the CDN stores the response for that country.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#a1a1a1"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#3b82f6"/>
+    </marker>
+    <style>
+      .sans { font-family: Geist, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+      .mono { font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .title { font-size: 15px; font-weight: 600; fill: #ededed; }
+      .label { font-size: 12px; fill: #a1a1a1; }
+      .code  { font-size: 12.5px; fill: #ededed; }
+      .blue  { fill: #60a5fa; }
+      .green { fill: #4ade80; }
+      .box   { fill: #111111; stroke: #2e2e2e; stroke-width: 1; }
+      .hl    { fill: #0b1a2e; stroke: #1d4ed8; stroke-width: 1; }
+    </style>
+  </defs>
+
+  <!-- canvas -->
+  <rect width="960" height="600" rx="16" fill="#000000"/>
+  <text x="32" y="44" class="sans" font-size="18" font-weight="600" fill="#ededed">Per-country CDN caching on Vercel</text>
+  <path d="M906 26 L922 54 L890 54 Z" fill="#ededed"/>
+
+  <!-- request -->
+  <rect x="32" y="96" width="132" height="64" rx="10" class="box"/>
+  <text x="98" y="124" text-anchor="middle" class="sans title">Request</text>
+  <text x="98" y="144" text-anchor="middle" class="sans label">from the browser</text>
+  <line x1="164" y1="128" x2="210" y2="128" stroke="#a1a1a1" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- proxy -->
+  <rect x="214" y="80" width="316" height="226" rx="12" class="box"/>
+  <text x="234" y="108" class="sans title">proxy.ts</text>
+  <text x="510" y="108" text-anchor="end" class="sans label">runs on every request</text>
+  <text x="234" y="140" class="sans label">1. Get country from Vercel geolocation</text>
+  <text x="250" y="160" class="mono code">x-vercel-ip-country → US</text>
+  <text x="234" y="192" class="sans label">2. Set request headers for the page</text>
+  <text x="250" y="214" class="mono code blue">x-country: US</text>
+  <text x="250" y="236" class="mono code blue">x-extra-vary: x-country</text>
+  <text x="250" y="258" class="mono code blue">x-extra-response-headers:</text>
+  <text x="270" y="278" class="mono code blue">x-country</text>
+
+  <!-- proxy -> CDN -->
+  <line x1="530" y1="140" x2="590" y2="140" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <text x="560" y="130" text-anchor="middle" class="sans label blue">request</text>
+  <text x="560" y="162" text-anchor="middle" class="sans label blue">headers</text>
+
+  <!-- CDN -->
+  <rect x="594" y="80" width="334" height="140" rx="12" class="box"/>
+  <text x="614" y="108" class="sans title">Vercel CDN cache</text>
+  <text x="614" y="138" class="sans label">Key: URL + the request's</text>
+  <text x="768" y="138" class="mono code blue">x-country</text>
+  <text x="614" y="160" class="sans label">TTL: Vercel-CDN-Cache-Control (next.config.ts)</text>
+  <text x="614" y="194" class="sans label"><tspan class="green" font-weight="600">HIT</tspan>: return the cached copy for this country</text>
+
+  <!-- CDN <-> page -->
+  <line x1="700" y1="220" x2="700" y2="290" stroke="#a1a1a1" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="690" y="260" text-anchor="end" class="sans label">MISS</text>
+  <line x1="822" y1="290" x2="822" y2="220" stroke="#a1a1a1" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="832" y="252" class="sans label">store for</text>
+  <text x="832" y="268" class="sans label">this country</text>
+
+  <!-- page function -->
+  <rect x="594" y="294" width="334" height="140" rx="12" class="hl"/>
+  <text x="614" y="322" class="sans title">Page function</text>
+  <text x="908" y="322" text-anchor="end" class="sans label">patched Next.js 16.4.2</text>
+  <text x="614" y="352" class="sans label">Get request headers from the proxy, then set:</text>
+  <text x="630" y="378" class="mono code"><tspan class="green">x-country: US</tspan></text>
+  <text x="630" y="400" class="mono code"><tspan class="green">Vary: x-country</tspan>, rsc, …</text>
+
+  <!-- CDN -> response (right margin) -->
+  <path d="M928 150 L944 150 L944 520 L928 520" fill="none" stroke="#a1a1a1" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- response -->
+  <rect x="214" y="466" width="714" height="104" rx="12" class="box"/>
+  <text x="234" y="494" class="sans title">Response to the browser</text>
+  <text x="234" y="518" class="mono code">x-country: US</text>
+  <text x="234" y="538" class="mono code">vary: <tspan class="green">x-country</tspan>, rsc, next-router-state-tree, …</text>
+  <text x="234" y="558" class="mono code">x-vercel-cache: <tspan class="green">HIT</tspan></text>
+  <text x="908" y="558" text-anchor="end" class="sans label">repeat visits from the same country</text>
+
+  <!-- back to browser -->
+  <path d="M214 518 L98 518 L98 164" fill="none" stroke="#a1a1a1" stroke-width="1.5" marker-end="url(#arrow)"/>
+</svg>
