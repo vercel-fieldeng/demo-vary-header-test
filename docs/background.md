@@ -56,8 +56,9 @@ breaks caching when `x-country` is also in `Vary`:
 
 A `next.config.ts` rule can't copy the value into the response either: it's
 evaluated before the proxy sets the request header. So the patched page function
-copies it (`x-extra-response-headers`). A function-set `x-country` response
-header caches and splits correctly.
+copies it: every header listed in `x-extra-vary` is added to `Vary` and copied
+from the request onto the response. A function-set `x-country` response header
+caches and splits correctly.
 
 **RSC requests** are cached separately from HTML. Vercel routes them to their own
 path (`/index.rsc`), independent of `Vary`.
@@ -71,30 +72,55 @@ The patch edits 12 compiled files in `node_modules/next/dist`:
 
 | Files | Change |
 |---|---|
-| `build/templates/app-page-runtime.js` (CJS and ESM) | Reads `x-extra-vary` (header names to add to `Vary`). Copies the request headers named in `x-extra-response-headers` onto the response |
+| `build/templates/app-page-runtime.js` (CJS and ESM) | Reads `x-extra-vary`, adds the names to `Vary`, and copies those request headers onto the response |
 | `server/route-modules/app-page/module.js` (CJS and ESM) | `getVaryHeader()` merges the extra names into Next's own `Vary`, without duplicates |
 | `compiled/next-server/app-page*.runtime.{dev,prod}.js` (8 bundles) | The same `Vary` merge, for the prebuilt runtime |
 
-Both helper headers accept at most 5 header names, and only well-formed ones.
-`x-extra-vary` never accepts `cookie` or `authorization`. `x-extra-response-headers`
-never copies sensitive or hop-by-hop headers (`set-cookie`, `cache-control`, `vary`,
-`location`, `content-*`, `x-vercel-*`, …), and only copies printable values up to
-256 characters.
+`x-extra-vary` accepts at most 5 header names, and only well-formed ones. It
+refuses names that are dangerous to copy onto a (possibly cached) response or
+meaningless in `Vary`: `set-cookie`, `cookie`, `authorization`, `cache-control`,
+`cdn-cache-control`, `vercel-cdn-cache-control`, `vary`, `location`, `refresh`,
+`link`, `content-*`, `access-control-*`, `cross-origin-*`,
+`strict-transport-security`, `x-vercel-*`, `x-forwarded-*`, and others (see
+`SENSITIVE` in the generator). Copied values must be printable and at most 256
+characters.
 
 The patch file is about 1.5 MB because the prebuilt bundles are minified onto
 single lines. Review [`scripts/apply-vary-patch.mjs`](../scripts/apply-vary-patch.mjs)
 instead: it makes the same changes and comments each one.
 
-## About the helper request headers
+## Security notes
 
-Only your proxy sets `x-extra-vary` and `x-extra-response-headers`, on the request
-it passes to the page. Browsers never send them, and they never appear in
-responses.
+**Who sets `x-extra-vary`.** Only your proxy should, on the request it passes to
+the page. Browsers never send it, and it never appears in responses.
 
-On pages the proxy covers, `set` replaces any value already on the request. On a
-page the proxy doesn't cover, a client could send them: add up to 5 names to `Vary`,
-or have their own header values echoed back. Neither changes page content. Keep the
-proxy matcher covering all pages.
+**Why one header.** Earlier versions used a second request header to list which
+headers to copy onto the response. On Vercel, a header that's in `Vary` must come
+from the page function (a proxy response header with the same name breaks
+caching), so "headers in `Vary`" and "headers to copy" are the same list. One
+header removes the duplication.
+
+**The page can't tell which request headers the proxy added.**
+`NextResponse.next({ request: { headers } })` forwards *every* header in the
+object, including the visitor's `cookie` and `authorization`. So the page can't
+simply echo "what the proxy set"; it has to be told which names.
+
+**Forging on pages the proxy doesn't cover.** On pages the proxy covers, `set`
+replaces any client-sent `x-extra-vary` and `x-country`. On a page it doesn't
+cover, a visitor can send their own `x-extra-vary` plus a matching header:
+
+- Refused names (above) are never copied or added to `Vary`, so a visitor can't
+  inject caching, redirect, CORS, cookie, or security headers.
+- Allowed custom names can be added to `Vary` (more cache copies and misses) and
+  echoed back to that visitor. Other visitors aren't affected: the extra header
+  is in `Vary`, so a shared cache keeps it as a separate copy.
+- The refusal list is a blocklist. A future header that's dangerous to echo
+  wouldn't be on it, so the main defense is a proxy matcher that covers every
+  page.
+
+**Fail closed.** `scripts/check-patch.mjs` runs as `prebuild` and fails the build
+if the patch isn't applied. Without it, the caching rule would still cache pages
+that lack `Vary: x-country`.
 
 ## Regenerating the patch
 

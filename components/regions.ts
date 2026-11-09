@@ -95,5 +95,5 @@ export const REGIONS: Record<RegionKey, Region> = {
 export const REGION_KEYS = Object.keys(REGIONS) as RegionKey[];
 
 export function isRegionKey(value: string | null | undefined): value is RegionKey {
-  return !!value && value in REGIONS;
+  return !!value && Object.hasOwn(REGIONS, value);
 }

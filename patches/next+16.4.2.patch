@@ -1,27 +1,21 @@
 diff --git a/node_modules/next/dist/build/templates/app-page-runtime.js b/node_modules/next/dist/build/templates/app-page-runtime.js
-index fc5eef1..2684a9f 100644
+index fc5eef1..5fb0019 100644
 --- a/node_modules/next/dist/build/templates/app-page-runtime.js
 +++ b/node_modules/next/dist/build/templates/app-page-runtime.js
-@@ -463,8 +463,22 @@ function createAppPageEntrypoint({ tree, page, pathname, require: __next_app_req
+@@ -463,8 +463,16 @@ function createAppPageEntrypoint({ tree, page, pathname, require: __next_app_req
              return null;
          };
          try {
 -            const varyHeader = routeModule.getVaryHeader(resolvedPathname, interceptionRoutePatterns);
-+            // Patched (patch-package): extra Vary fields from the `x-extra-vary`
-+            // request header. On Vercel the proxy runs as a separate function and its
-+            // response Vary is replaced by this function's Vary, so the proxy sends
-+            // the field names as a request header instead.
-+            // Only header-name tokens, max 5, never cookie/authorization.
-+            const extraVary = String(req.headers['x-extra-vary'] ?? '').split(',').map((field)=>field.trim()).filter((field)=>/^[A-Za-z0-9-]+$/.test(field) && !/^(cookie|authorization)$/i.test(field)).slice(0, 5);
++            // Patched (patch-package): `x-extra-vary` lists custom headers, set by the
++            // app's proxy, that are added to Vary and copied from the request onto the
++            // response. Header-name tokens only, max 5, never sensitive names.
++            const extraVary = String(req.headers['x-extra-vary'] ?? '').split(',').map((field)=>field.trim().toLowerCase()).filter((field)=>/^[a-z0-9-]+$/.test(field) && !/^(set-cookie|cookie|authorization|proxy-authorization|www-authenticate|cache-control|cdn-cache-control|vercel-cdn-cache-control|surrogate-control|expires|pragma|age|vary|location|refresh|link|connection|keep-alive|upgrade|trailer|transfer-encoding|te|host|content-.*|access-control-.*|cross-origin-.*|strict-transport-security|clear-site-data|x-middleware-.*|x-vercel-.*|x-nextjs-.*|x-forwarded-.*|x-real-ip|x-extra-vary|rsc|next-.*)$/.test(field)).slice(0, 5);
 +            const varyHeader = routeModule.getVaryHeader(resolvedPathname, interceptionRoutePatterns, extraVary);
              res.setHeader('Vary', varyHeader);
-+            // Patched (patch-package): copy the request headers named in
-+            // `x-extra-response-headers` onto the response. On Vercel a proxy-set
-+            // response header that is also named in Vary breaks CDN caching, so the
-+            // proxy puts the value on the request and the page function sends it.
-+            for (const name of String(req.headers['x-extra-response-headers'] ?? '').split(',').map((field)=>field.trim().toLowerCase()).filter((field)=>/^[a-z0-9-]+$/.test(field) && !/^(set-cookie|cookie|authorization|cache-control|vary|location|connection|transfer-encoding|content-.*|x-middleware-.*|x-vercel-.*)$/.test(field)).slice(0, 5)){
++            for (const name of extraVary){
 +                const value = req.headers[name];
-+                if (typeof value === 'string' && /^[ -~]{1,256}$/.test(value)) res.setHeader(name, value);
++                if (typeof value === 'string' && /^[\x20-\x7e]{1,256}$/.test(value)) res.setHeader(name, value);
 +            }
              let parentSpan;
              const invokeRouteModule = async (span, context, renderOperation)=>{
@@ -123,35 +117,29 @@ index e00929f..f4910f8 100644
  //# sourceMappingURL=app-page.runtime.prod.js.map
 \ No newline at end of file
 diff --git a/node_modules/next/dist/esm/build/templates/app-page-runtime.js b/node_modules/next/dist/esm/build/templates/app-page-runtime.js
-index 96beb1b..7e1fb97 100644
+index 96beb1b..44e8dba 100644
 --- a/node_modules/next/dist/esm/build/templates/app-page-runtime.js
 +++ b/node_modules/next/dist/esm/build/templates/app-page-runtime.js
-@@ -482,8 +482,22 @@ export function createAppPageEntrypoint({ tree, page, pathname, require: __next_
+@@ -482,8 +482,16 @@ export function createAppPageEntrypoint({ tree, page, pathname, require: __next_
              return null;
          };
          try {
 -            const varyHeader = routeModule.getVaryHeader(resolvedPathname, interceptionRoutePatterns);
-+            // Patched (patch-package): extra Vary fields from the `x-extra-vary`
-+            // request header. On Vercel the proxy runs as a separate function and its
-+            // response Vary is replaced by this function's Vary, so the proxy sends
-+            // the field names as a request header instead.
-+            // Only header-name tokens, max 5, never cookie/authorization.
-+            const extraVary = String(req.headers['x-extra-vary'] ?? '').split(',').map((field)=>field.trim()).filter((field)=>/^[A-Za-z0-9-]+$/.test(field) && !/^(cookie|authorization)$/i.test(field)).slice(0, 5);
++            // Patched (patch-package): `x-extra-vary` lists custom headers, set by the
++            // app's proxy, that are added to Vary and copied from the request onto the
++            // response. Header-name tokens only, max 5, never sensitive names.
++            const extraVary = String(req.headers['x-extra-vary'] ?? '').split(',').map((field)=>field.trim().toLowerCase()).filter((field)=>/^[a-z0-9-]+$/.test(field) && !/^(set-cookie|cookie|authorization|proxy-authorization|www-authenticate|cache-control|cdn-cache-control|vercel-cdn-cache-control|surrogate-control|expires|pragma|age|vary|location|refresh|link|connection|keep-alive|upgrade|trailer|transfer-encoding|te|host|content-.*|access-control-.*|cross-origin-.*|strict-transport-security|clear-site-data|x-middleware-.*|x-vercel-.*|x-nextjs-.*|x-forwarded-.*|x-real-ip|x-extra-vary|rsc|next-.*)$/.test(field)).slice(0, 5);
 +            const varyHeader = routeModule.getVaryHeader(resolvedPathname, interceptionRoutePatterns, extraVary);
              res.setHeader('Vary', varyHeader);
-+            // Patched (patch-package): copy the request headers named in
-+            // `x-extra-response-headers` onto the response. On Vercel a proxy-set
-+            // response header that is also named in Vary breaks CDN caching, so the
-+            // proxy puts the value on the request and the page function sends it.
-+            for (const name of String(req.headers['x-extra-response-headers'] ?? '').split(',').map((field)=>field.trim().toLowerCase()).filter((field)=>/^[a-z0-9-]+$/.test(field) && !/^(set-cookie|cookie|authorization|cache-control|vary|location|connection|transfer-encoding|content-.*|x-middleware-.*|x-vercel-.*)$/.test(field)).slice(0, 5)){
++            for (const name of extraVary){
 +                const value = req.headers[name];
-+                if (typeof value === 'string' && /^[ -~]{1,256}$/.test(value)) res.setHeader(name, value);
++                if (typeof value === 'string' && /^[\x20-\x7e]{1,256}$/.test(value)) res.setHeader(name, value);
 +            }
              let parentSpan;
              const invokeRouteModule = async (span, context, renderOperation)=>{
                  const nextReq = new NodeNextRequest(req);
 diff --git a/node_modules/next/dist/esm/server/route-modules/app-page/module.js b/node_modules/next/dist/esm/server/route-modules/app-page/module.js
-index 36a8902..3ea70a7 100644
+index 36a8902..662fe2d 100644
 --- a/node_modules/next/dist/esm/server/route-modules/app-page/module.js
 +++ b/node_modules/next/dist/esm/server/route-modules/app-page/module.js
 @@ -84,17 +84,19 @@ export class AppPageRouteModule extends RouteModule {
@@ -177,13 +165,14 @@ index 36a8902..3ea70a7 100644
      }
      constructor(...args){
          super(...args), this.matchers = new WeakMap(), this.normalizers = {
-@@ -103,6 +105,31 @@ export class AppPageRouteModule extends RouteModule {
+@@ -103,6 +105,32 @@ export class AppPageRouteModule extends RouteModule {
          };
      }
  }
 +/**
 + * Merges extra field names (from the `x-extra-vary` request header, set by the
-+ * app's proxy) into the `Vary` header the router needs, skipping duplicates.
++ * app's proxy, already filtered) into the `Vary` header the router needs,
++ * skipping duplicates.
 + * Patched in via patch-package; merge logic adapted from vercel/next.js#98104.
 + */ function mergeVaryHeader(existing, added) {
 +    const fields = [];
@@ -210,7 +199,7 @@ index 36a8902..3ea70a7 100644
      'react-rsc': vendoredReactRSC,
      'react-ssr': vendoredReactSSR,
 diff --git a/node_modules/next/dist/server/route-modules/app-page/module.js b/node_modules/next/dist/server/route-modules/app-page/module.js
-index c349d2a..d7c0550 100644
+index c349d2a..9de65a2 100644
 --- a/node_modules/next/dist/server/route-modules/app-page/module.js
 +++ b/node_modules/next/dist/server/route-modules/app-page/module.js
 @@ -159,17 +159,19 @@ class AppPageRouteModule extends _routemodule.RouteModule {
@@ -236,13 +225,14 @@ index c349d2a..d7c0550 100644
      }
      constructor(...args){
          super(...args), this.matchers = new WeakMap(), this.normalizers = {
-@@ -178,6 +180,31 @@ class AppPageRouteModule extends _routemodule.RouteModule {
+@@ -178,6 +180,32 @@ class AppPageRouteModule extends _routemodule.RouteModule {
          };
      }
  }
 +/**
 + * Merges extra field names (from the `x-extra-vary` request header, set by the
-+ * app's proxy) into the `Vary` header the router needs, skipping duplicates.
++ * app's proxy, already filtered) into the `Vary` header the router needs,
++ * skipping duplicates.
 + * Patched in via patch-package; merge logic adapted from vercel/next.js#98104.
 + */ function mergeVaryHeader(existing, added) {
 +    const fields = [];

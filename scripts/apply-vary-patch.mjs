@@ -1,25 +1,30 @@
 // Applies the Vary fix to a CLEAN (unpatched) next@16.4.2 in node_modules.
 // After running it, `yarn patch-package next` writes patches/next+16.4.2.patch.
 //
-// Goal: let App Router page responses on Vercel carry extra Vary fields.
-// On Vercel the proxy runs as a separate function, and a page function's Vary
-// replaces the proxy's. So the proxy sends the field names as the
-// `x-extra-vary` REQUEST header, and the page function merges them into the
-// Vary it sets. (Merge logic adapted from vercel/next.js#98104.)
+// Goal: let App Router page responses on Vercel carry custom headers that are
+// also listed in Vary (e.g. x-country), so Vercel's CDN keeps one cached copy
+// per value. On Vercel the proxy runs as a separate function: a page
+// function's Vary replaces the proxy's, and a proxy response header that is
+// also named in Vary breaks CDN caching. So the proxy puts the value on the
+// REQUEST and lists the header name in the `x-extra-vary` request header. The
+// patched page function adds each listed name to Vary and copies that request
+// header onto the response. (Merge logic adapted from vercel/next.js#98104.)
 //
 // What it changes (12 files):
 //  1–2) dist/(esm/)server/route-modules/app-page/module.js
 //       getVaryHeader(..., extraVaryFields) merges extra fields into Next's
 //       own Vary (case-insensitive, no duplicates, Next's fields kept).
 //  3–4) dist/(esm/)build/templates/app-page-runtime.js
-//       The call site reads `x-extra-vary` from the request. Header-name tokens
-//       only, max 5, never cookie/authorization.
-//       It also copies the request headers named in `x-extra-response-headers`
-//       onto the response. A proxy can't set these itself on Vercel without
-//       breaking CDN caching when the same header name is in Vary.
-//       Max 5 names, safe values only, never sensitive/hop-by-hop headers.
+//       Reads `x-extra-vary`: header-name tokens only, max 5, never sensitive
+//       names (see SENSITIVE below). Adds them to Vary and copies each named
+//       request header (printable, max 256 chars) onto the response.
 //  5–12) dist/compiled/next-server/app-page*.runtime.{dev,prod}.js
 //       Prebuilt runtime bundles: getVaryHeader wrapped with the same merge.
+//
+// Trust: on pages the proxy covers, the proxy overwrites `x-extra-vary`. On
+// pages it doesn't cover, a client can send its own list, so names that are
+// dangerous to echo or vary on are always refused. Keep the proxy matcher
+// covering every page.
 //
 // Every replacement must match exactly once, so on any other Next.js version
 // the script stops with an error instead of patching the wrong code. Use it as
@@ -48,7 +53,8 @@ function replaceOnce(file, from, to) {
 const MERGE_FN = `
 /**
  * Merges extra field names (from the \`x-extra-vary\` request header, set by the
- * app's proxy) into the \`Vary\` header the router needs, skipping duplicates.
+ * app's proxy, already filtered) into the \`Vary\` header the router needs,
+ * skipping duplicates.
  * Patched in via patch-package; merge logic adapted from vercel/next.js#98104.
  */ function mergeVaryHeader(existing, added) {
     const fields = [];
@@ -93,26 +99,24 @@ for (const [file, hdr] of [
   replaceOnce(file, "\nconst vendored = {", `${MERGE_FN}const vendored = {`);
 }
 
-// 3–4) Page template (CJS + ESM): pass the x-extra-vary request header fields.
+// 3–4) Page template (CJS + ESM): read x-extra-vary, add the names to Vary, and
+// copy those request headers onto the response.
+// Names refused even if listed: dangerous to echo onto a (possibly cached)
+// response, or meaningless/harmful in Vary.
+const SENSITIVE = "set-cookie|cookie|authorization|proxy-authorization|www-authenticate|cache-control|cdn-cache-control|vercel-cdn-cache-control|surrogate-control|expires|pragma|age|vary|location|refresh|link|connection|keep-alive|upgrade|trailer|transfer-encoding|te|host|content-.*|access-control-.*|cross-origin-.*|strict-transport-security|clear-site-data|x-middleware-.*|x-vercel-.*|x-nextjs-.*|x-forwarded-.*|x-real-ip|x-extra-vary|rsc|next-.*";
 const CALL_SITE_OLD =
   "            const varyHeader = routeModule.getVaryHeader(resolvedPathname, interceptionRoutePatterns);\n";
-const CALL_SITE_NEW = `            // Patched (patch-package): extra Vary fields from the \`x-extra-vary\`
-            // request header. On Vercel the proxy runs as a separate function and its
-            // response Vary is replaced by this function's Vary, so the proxy sends
-            // the field names as a request header instead.
-            // Only header-name tokens, max 5, never cookie/authorization.
-            const extraVary = String(req.headers['x-extra-vary'] ?? '').split(',').map((field)=>field.trim()).filter((field)=>/^[A-Za-z0-9-]+$/.test(field) && !/^(cookie|authorization)$/i.test(field)).slice(0, 5);
+const CALL_SITE_NEW = `            // Patched (patch-package): \`x-extra-vary\` lists custom headers, set by the
+            // app's proxy, that are added to Vary and copied from the request onto the
+            // response. Header-name tokens only, max 5, never sensitive names.
+            const extraVary = String(req.headers['x-extra-vary'] ?? '').split(',').map((field)=>field.trim().toLowerCase()).filter((field)=>/^[a-z0-9-]+$/.test(field) && !/^(${SENSITIVE})$/.test(field)).slice(0, 5);
             const varyHeader = routeModule.getVaryHeader(resolvedPathname, interceptionRoutePatterns, extraVary);
 `;
 const SET_VARY_OLD = "            res.setHeader('Vary', varyHeader);\n";
 const SET_VARY_NEW = `            res.setHeader('Vary', varyHeader);
-            // Patched (patch-package): copy the request headers named in
-            // \`x-extra-response-headers\` onto the response. On Vercel a proxy-set
-            // response header that is also named in Vary breaks CDN caching, so the
-            // proxy puts the value on the request and the page function sends it.
-            for (const name of String(req.headers['x-extra-response-headers'] ?? '').split(',').map((field)=>field.trim().toLowerCase()).filter((field)=>/^[a-z0-9-]+$/.test(field) && !/^(set-cookie|cookie|authorization|cache-control|vary|location|connection|transfer-encoding|content-.*|x-middleware-.*|x-vercel-.*)$/.test(field)).slice(0, 5)){
+            for (const name of extraVary){
                 const value = req.headers[name];
-                if (typeof value === 'string' && /^[\x20-\x7e]{1,256}$/.test(value)) res.setHeader(name, value);
+                if (typeof value === 'string' && /^[\\x20-\\x7e]{1,256}$/.test(value)) res.setHeader(name, value);
             }
 `;
 for (const file of [d("build/templates/app-page-runtime.js"), d("esm/build/templates/app-page-runtime.js")]) {

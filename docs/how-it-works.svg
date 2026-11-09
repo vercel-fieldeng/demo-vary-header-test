@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="960" height="600" viewBox="0 0 960 600" role="img" aria-labelledby="title desc">
   <title id="title">How per-country CDN caching works on Vercel</title>
-  <desc id="desc">The proxy gets the visitor's country from Vercel geolocation and sets three request headers: x-country, x-extra-vary and x-extra-response-headers. Vercel's CDN keys its cache on the URL plus the request's x-country header. On a hit it returns the cached copy. On a miss the patched page function runs, sets the x-country response header and adds x-country to Vary, and the CDN stores the response for that country.</desc>
+  <desc id="desc">The proxy gets the visitor's country from Vercel geolocation and sets two request headers: x-country and x-extra-vary: x-country. Vercel's CDN keys its cache on the URL plus the request's x-country header. On a hit it returns the cached copy. On a miss the patched page function runs, adds x-country to Vary and copies it onto the response, and the CDN stores the response for that country.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#a1a1a1"/>
@@ -33,7 +33,7 @@
   <line x1="164" y1="128" x2="210" y2="128" stroke="#a1a1a1" stroke-width="1.5" marker-end="url(#arrow)"/>
 
   <!-- proxy -->
-  <rect x="214" y="80" width="316" height="226" rx="12" class="box"/>
+  <rect x="214" y="80" width="316" height="182" rx="12" class="box"/>
   <text x="234" y="108" class="sans title">proxy.ts</text>
   <text x="510" y="108" text-anchor="end" class="sans label">runs on every request</text>
   <text x="234" y="140" class="sans label">1. Get country from Vercel geolocation</text>
@@ -41,8 +41,6 @@
   <text x="234" y="192" class="sans label">2. Set request headers for the page</text>
   <text x="250" y="214" class="mono code blue">x-country: US</text>
   <text x="250" y="236" class="mono code blue">x-extra-vary: x-country</text>
-  <text x="250" y="258" class="mono code blue">x-extra-response-headers:</text>
-  <text x="270" y="278" class="mono code blue">x-country</text>
 
   <!-- proxy -> CDN -->
   <line x1="530" y1="140" x2="590" y2="140" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arrow-blue)"/>

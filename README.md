@@ -20,16 +20,15 @@ Use this repo as a working reference while you follow the steps below.
 ## How it works
 
 On Vercel, `proxy.ts` runs as [Routing Middleware](https://vercel.com/docs/routing-middleware),
-before the cache, on every request. It gets the visitor's country and sets three
+before the cache, on every request. It gets the visitor's country and sets two
 **request** headers for the page:
 
 | Request header | Purpose |
 |---|---|
 | `x-country: US` | The cache key. The CDN keeps one copy per value, because of `Vary: x-country` |
-| `x-extra-vary: x-country` | Tells the page to add `x-country` to its `Vary` |
-| `x-extra-response-headers: x-country` | Tells the page to send `x-country` as a response header |
+| `x-extra-vary: x-country` | Tells the page to add `x-country` to its `Vary` and send it as a response header |
 
-A small patch to Next.js makes the page act on the last two. A
+A small patch to Next.js makes the page act on `x-extra-vary`. A
 [`Vercel-CDN-Cache-Control`](https://vercel.com/docs/caching/cache-control-headers#vercel-cdn-cache-control)
 rule in `next.config.ts` lets the CDN cache the page.
 
@@ -98,6 +97,18 @@ yarn install
 
 The output should include `next@16.4.2 ✔`.
 
+Also copy [`scripts/check-patch.mjs`](scripts/check-patch.mjs) and run it before
+every build, so a build fails if the patch isn't applied:
+
+```json
+"scripts": {
+  "prebuild": "node scripts/check-patch.mjs"
+}
+```
+
+Without the patch, pages are still cached but without `Vary: x-country`, so one
+country's page would be served to everyone.
+
 ### 3. Add the header module
 
 Copy [`lib/country.ts`](lib/country.ts). It provides two functions:
@@ -105,7 +116,7 @@ Copy [`lib/country.ts`](lib/country.ts). It provides two functions:
 | Function | What it does |
 |---|---|
 | `resolveCountry(headers)` | Gets the country from Vercel's [`x-vercel-ip-country`](https://vercel.com/docs/headers/request-headers#x-vercel-ip-country) header |
-| `setCountryRequestHeaders(headers, country)` | Sets the three request headers above |
+| `setCountryRequestHeaders(headers, country)` | Sets the two request headers above |
 
 ### 4. Call it from `proxy.ts`
 
@@ -129,6 +140,9 @@ export const config = {
   Without the `request` option, the page never receives them.
 - Don't set `x-country` on the proxy's **response**. It stops the CDN from
   caching per country.
+- **The matcher must cover every page**, not just the ones you cache. The patch
+  applies to all pages, and on a page the proxy doesn't cover, a visitor could
+  send their own `x-extra-vary` (see [Limitations](#limitations)).
 
 ### 5. Let the CDN cache the pages
 
@@ -197,15 +211,31 @@ and no CDN.
 
 ## Limitations
 
+- **This is not an officially supported solution.** It's a proof of concept that
+  patches internal, undocumented Next.js code and relies on Vercel platform
+  behavior confirmed by testing, not by documentation. This POC makes no
+  guarantee that the approach will keep working in, or be supported by, any
+  Next.js release, including LTS versions. Re-test after every Next.js upgrade
+  and every change to your Vercel setup.
 - **Don't cache per-user pages.** Everyone in a country shares one cached copy.
 - **Responses that set cookies aren't cached.** Vercel skips caching responses
   with `Set-Cookie`
   ([cacheable response criteria](https://vercel.com/docs/caching/cdn-cache#cacheable-response-criteria)).
 - **Each Vercel region fills its own cache.** The first request per country, per
   region, renders the page ([CDN cache limits](https://vercel.com/docs/caching/cdn-cache#limits)).
-- **Partial Prerendering pages (`◐`)** keep the `Vary` from build time, so
-  `x-country` isn't added.
-- **Edge-runtime pages** aren't covered by the patch.
+- **Only cache pages that are fully dynamic (`ƒ`), use the Node.js runtime, and
+  are covered by the proxy.** Otherwise they're cached without a correct
+  `Vary: x-country`, and one country's page is served to everyone:
+  - **Partial Prerendering pages (`◐`)** keep the `Vary` from build time.
+  - **Edge-runtime pages** aren't covered by the patch.
+  - **Pages the proxy doesn't cover** don't get the visitor's `x-country`.
+- **`x-extra-vary` can be forged on pages the proxy doesn't cover.** There, a
+  visitor can send their own `x-extra-vary` and a matching header, and the page
+  adds it to `Vary` and echoes it back. The patch refuses names that are
+  dangerous to echo or vary on (`set-cookie`, `cache-control`,
+  `vercel-cdn-cache-control`, `location`, `refresh`, `access-control-*`, …), so
+  the worst case is extra `Vary` fields (more cache misses) or an echoed custom
+  header. Keep the proxy matcher covering every page.
 - **The patch only applies to Next.js 16.4.2.** Regenerate it when you upgrade
   ([docs/background.md](docs/background.md#regenerating-the-patch)).
 
@@ -217,6 +247,7 @@ and no CDN.
 | Always `HIT`, but the wrong country | The proxy is setting `x-country` as a response header. Set it on the request only (step 4) |
 | `vary` or `x-country` missing | Check that the page is `ƒ` in the build log, the proxy matcher covers it, and you pass `{ request: { headers } }` |
 | Build fails with `Failed to apply patch for package next` after you change the patch | Redeploy once without the build cache ([`vercel deploy --force`](https://vercel.com/docs/cli/deploy#force), or **Redeploy** with **Use existing Build Cache** turned off) |
+| Build fails with `check-patch: … is not patched` | The patch didn't apply. Run `yarn install`, check the `postinstall` script, or redeploy without the build cache |
 | Every page returns 404 on Vercel | Set the project's [Framework Preset](https://vercel.com/docs/builds/configure-a-build#framework-preset) to Next.js |
 
 ## About this repo
@@ -228,6 +259,7 @@ and no CDN.
 | `next.config.ts` | The `Vercel-CDN-Cache-Control` rule |
 | `patches/next+16.4.2.patch` | The Next.js patch |
 | `scripts/apply-vary-patch.mjs` | Generates the patch and documents each change |
+| `scripts/check-patch.mjs` | Fails the build if the patch isn't applied |
 | `components/`, `app/page.tsx` | Demo page only |
 | `docs/background.md` | Why it works, the tests behind it, other versions |
 
